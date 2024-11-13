@@ -132,18 +132,18 @@ function PresalePage() {
       const formattedPresales = presalesList.map((presale: any) => {
         try {
           return {
-            tokenAddress: presale.tokenAddress,
-            name: presale.name || 'Unknown',
-            symbol: presale.symbol || 'Unknown',
-            logoUrl: presale.logoUrl || '/default-token-logo.png',
-            softCap: ethers.utils.formatEther(presale.softCap),
-            hardCap: ethers.utils.formatEther(presale.hardCap),
-            currentRaised: ethers.utils.formatEther(presale.currentRaised),
-            startTime: Number(presale.startTime),
-            endTime: Number(presale.endTime),
+            tokenAddress: presale.tokenInfo.tokenAddress,
+            name: presale.tokenInfo.name || 'Unknown',
+            symbol: presale.tokenInfo.symbol || 'Unknown',
+            logoUrl: presale.tokenInfo.logoUrl || '/default-token-logo.png',
+            softCap: ethers.utils.formatEther(presale.saleInfo.softCap),
+            hardCap: ethers.utils.formatEther(presale.saleInfo.hardCap),
+            currentRaised: ethers.utils.formatEther(presale.statusInfo.raisedAmount),
+            startTime: Number(presale.timeInfo.startTime),
+            endTime: Number(presale.timeInfo.endTime),
             status: getPresaleStatus(
-              Number(presale.startTime),
-              Number(presale.endTime)
+              Number(presale.timeInfo.startTime),
+              Number(presale.timeInfo.endTime)
             )
           };
         } catch (error) {
