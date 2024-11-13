@@ -2,8 +2,6 @@
 import LogoURLIcon from "../../../assets/icons/logoURL-input.svg";
 import ExportedImage from "next-image-export-optimizer";
 
-import Image from "next/image";
-
 const Input = ({
   label = "",
   value = "",

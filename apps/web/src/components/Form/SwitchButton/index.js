@@ -1,8 +1,6 @@
 //! import icons
 import SwitchIcon from "../../../assets/icons/switch.svg";
 import SwitchActiveIcon from "../../../assets/icons/switch-active.svg";
-
-import Image from "next/image";
 import ExportedImage from "next-image-export-optimizer";
 
 const SwitchButton = ({ onClick = "", check = false }) => {

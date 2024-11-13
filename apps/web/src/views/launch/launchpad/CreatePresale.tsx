@@ -2,14 +2,18 @@
 
 import React, { useState, useEffect } from "react";
 import styled from 'styled-components';
-import { Box, Flex, Heading, Button, Card, Text, Progress, Radio, Checkbox, InputProps } from '@pancakeswap/uikit';
+import { Box, Flex, Heading, Button, Card, Text, Progress, Radio, Checkbox, InputProps, useToast } from '@pancakeswap/uikit';
 import { useTranslation } from '@pancakeswap/localization';
 import useTheme from 'hooks/useTheme';
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { useRouter } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
+import ReactSelect from 'react-select';
+import { ethers } from 'ethers';
+import { useCallWithGasPrice } from 'hooks/useCallWithGasPrice';
+import abi from './components/PresaleAbi';
+import {parseEther} from 'viem'
 
-import Input from "../../../components/Form/Input";
 import Warning from "../../../components/Alert/Warning";
 import DefaultSelect from "../../../components/Form/DefaultSelect";
 
@@ -26,6 +30,7 @@ import RedditIcon from "../../../assets/icons/reddit-input.svg";
 import YoutubeIcon from "../../../assets/icons/youtube-input.svg";
 import WarningIcon from "../../../assets/icons/warning.svg";
 import DatePickerIcon from "../../../assets/icons/datepicker.svg";
+import { CONTRACT_ADDRESS, RPC_URL, X_API_KEY, PINATA_API_KEY, PINATA_SECRET_KEY } from "./inputs";
 
 const CONTENT_WIDTH = '630px';
 
@@ -48,7 +53,7 @@ const StyledCard = styled(Card)`
   max-width: ${CONTENT_WIDTH};
 `;
 
-const StyledWarning = styled(Warning)<{ mb?: string }>`
+const StyledWarning = styled(Warning) <{ mb?: string }>`
   margin-bottom: ${({ mb }) => mb || '0'};
 `;
 
@@ -76,7 +81,7 @@ const CustomInput = styled.input`
   background-color: rgb(244, 240, 248); // Light purple background
   border: 1px solid ${({ theme }) => theme.colors.inputSecondary};
   border-radius: 16px;
-  color: ${({ theme }) => theme.colors.text};
+  color: black;
   display: block;
   font-size: 16px;
   height: 48px;
@@ -113,29 +118,31 @@ const CustomSelect = styled.select`
   }
 `;
 
-const StyledInput = styled(Input)`
-  background-color: rgb(244, 240, 248); // Light purple background to match date picker
-  border: 1px solid ${({ theme }) => theme.colors.inputSecondary};
-  border-radius: 16px;
-  color: ${({ theme }) => theme.colors.text};
-  height: 48px;
-  padding: 0 16px;
-  width: 100%;
+// const StyledInput = styled(Input)`
+//   background-color: rgb(244, 240, 248); // Light purple background to match date picker
+//   border: 1px solid ${({ theme }) => theme.colors.inputSecondary};
+//   border-radius: 16px;
+//   color: ${({ theme }) => theme.colors.text};
+//   height: 48px;
+//   padding: 0 16px;
+//   width: 100%;
   
-  &::placeholder {
-    color: ${({ theme }) => theme.colors.textSubtle};
-  }
+//   &::placeholder {
+//     color: ${({ theme }) => theme.colors.textSubtle};
+//   }
 
-  &:focus {
-    box-shadow: none;
-    border: 1px solid ${({ theme }) => theme.colors.primary};
-  }
-`;
+//   &:focus {
+//     box-shadow: none;
+//     border: 1px solid ${({ theme }) => theme.colors.primary};
+//   }
+// `;
 
 const StyledSelect = styled(DefaultSelect)`
   background-color: rgb(244, 240, 248);
+  width: 100%;
   .select-wrapper {
     background-color: rgb(244, 240, 248);
+    width: 100%;
   }
   select {
     background-color: rgb(244, 240, 248);
@@ -143,6 +150,7 @@ const StyledSelect = styled(DefaultSelect)`
     border-radius: 16px;
     height: 48px;
     padding: 0 16px;
+    width: 100%;
   }
 `;
 
@@ -187,7 +195,7 @@ const StyledDatePicker = styled(DatePicker)`
   background-color: rgb(244, 240, 248);
   border: 1px solid ${({ theme }) => theme.colors.inputSecondary};
   border-radius: 16px;
-  color: ${({ theme }) => theme.colors.text};
+  color: black;
   height: 48px;
   padding: 0 16px;
   width: 100%;
@@ -203,7 +211,7 @@ const StyledButton = styled(Button)`
   font-size: 16px;
 `;
 
-const StyledFlex = styled(Flex)<{ gap?: string }>`
+const StyledFlex = styled(Flex) <{ gap?: string }>`
   display: flex;
   flex-direction: ${({ flexDirection }) => flexDirection || 'row'};
   gap: ${({ gap }) => gap || '0'};
@@ -216,7 +224,7 @@ const ButtonContainer = styled(Flex)`
   margin-top: 24px;
 `;
 
-const FlexBox = styled(Box)<{ flex?: number }>`
+const FlexBox = styled(Box) <{ flex?: number }>`
   flex: ${({ flex }) => flex || 'initial'};
 `;
 
@@ -313,32 +321,91 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
     setFeeOption(`3.5% ${currency}`);
   }, [currency]);
 
+  // Add these validation functions near the top of the component
+  const validateStep1 = () => {
+    return (
+      validateTokenAddress(tokenAddress) &&
+      currency !== '' &&
+      feeOption !== '' &&
+      listingOption !== '' &&
+      affiliateProgram !== ''
+    );
+  };
+
+  const validateStep2 = () => {
+    const validations = {
+      presaleRate: validatePresaleRate(presaleRate),
+      whitelist: whitelist !== '',
+      softCap: validateSoftCap(softCap),
+      hardCap: validateHardCapVsSoftCap(hardCap, softCap),
+      minBuy: minBuy.trim() !== '',
+      maxBuy: maxBuy.trim() !== '',
+      liquidity: validateLiquidity(liquidity),
+      listingRate: validateListingRate(listingRate, presaleRate),
+      dates: startDate !== null && endDate !== null,
+      timeRange: validateTimeRange(startDate, endDate),
+      liquidityLockup: validateLockupTime(liquidityLockup),
+      refundType: refundType !== '',
+      router: dexRouter !== ''
+    };
+
+    // Log which validations are failing
+    console.log('Validation results:', validations);
+
+    return (
+      validations.presaleRate &&
+      validations.whitelist &&
+      validations.softCap &&
+      validations.hardCap &&
+      validations.minBuy &&
+      validations.maxBuy &&
+      validations.liquidity &&
+      validations.listingRate &&
+      validations.dates &&
+      validations.timeRange &&
+      validations.liquidityLockup &&
+      validations.refundType &&
+      validations.router
+    );
+  };
+
   const renderStep1 = () => (
     <>
       <StepHeader>
         <StepTitle>{t('Approve Token')}</StepTitle>
         <StepDescription>{t('Enter the token address and approve')}</StepDescription>
       </StepHeader>
-      
+
       <Flex flexDirection="column" alignItems="center" width="100%">
         <Box width="100%" maxWidth={CONTENT_WIDTH}>
           <Text fontSize="12px" color="warning" mb="16px">(*) {t('is required field.')}</Text>
-          
+
           <InputWrapper>
             <InputLabel>{t('Token Address*')}</InputLabel>
             <Box position="relative">
               <CustomInput
                 placeholder="0x..."
                 value={tokenAddress}
+                className="token-address-input"
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTokenAddress(e.target.value)}
+                style={{
+                  borderColor: tokenAddress && !validateTokenAddress(tokenAddress) 
+                    ? theme.colors.failure 
+                    : undefined
+                }}
               />
-              <CreateTokenButton 
+              <CreateTokenButton
                 scale="sm"
                 onClick={() => router.push("/launch/create-token")}
               >
                 {t('Create Token')}
               </CreateTokenButton>
             </Box>
+            {tokenAddress && !validateTokenAddress(tokenAddress) && (
+              <Text fontSize="12px" color="failure" mt="8px">
+                {t('Please enter a valid token address (0x... format)')}
+              </Text>
+            )}
           </InputWrapper>
 
           <Text fontSize="14px" color="primary" mb="16px">{t('Pool Creation fee: 1 BNB')}</Text>
@@ -348,7 +415,7 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
             <StyledFlex flexDirection="column" gap="8px">
               {['BNB', 'USDT', 'USDC', 'DAI', 'FLOKI'].map((option) => (
                 <Flex key={option} alignItems="center">
-                  <Radio 
+                  <Radio
                     scale="sm"
                     checked={currency === option}
                     onChange={() => setCurrency(option)}
@@ -366,7 +433,7 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
             <InputLabel>{t('Fee options*')}</InputLabel>
             <StyledFlex flexDirection="column" gap="8px">
               <Flex alignItems="center">
-                <Radio 
+                <Radio
                   scale="sm"
                   checked={feeOption === `3.5% ${currency}`}
                   onChange={() => setFeeOption(`3.5% ${currency}`)}
@@ -376,7 +443,7 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
                 </Text>
               </Flex>
               <Flex alignItems="center">
-                <Radio 
+                <Radio
                   scale="sm"
                   checked={feeOption === `1.5% ${currency} + 1.5% token`}
                   onChange={() => setFeeOption(`1.5% ${currency} + 1.5% token`)}
@@ -391,7 +458,7 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
           <InputWrapper>
             <InputLabel>{t('Listing Options*')}</InputLabel>
             <Flex alignItems="center">
-              <Radio 
+              <Radio
                 scale="sm"
                 checked={listingOption === 'Auto Listing'}
                 onChange={() => setListingOption('Auto Listing')}
@@ -405,7 +472,7 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
             <StyledFlex flexDirection="column" gap="8px">
               {['Disable', 'Enable'].map((option) => (
                 <Flex key={option} alignItems="center">
-                  <Radio 
+                  <Radio
                     scale="sm"
                     checked={affiliateProgram === option}
                     onChange={() => setAffiliateProgram(option)}
@@ -422,8 +489,12 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
             </Text>
           </StyledWarning>
 
+          {renderValidationMessage(1)}
           <ButtonContainer>
-            <StyledButton onClick={() => setStep(2)}>
+            <StyledButton
+              onClick={() => setStep(2)}
+              disabled={!validateStep1()}
+            >
               {t('Next')}
             </StyledButton>
           </ButtonContainer>
@@ -432,58 +503,91 @@ const CreatePresale: React.FC<CreatePresaleProps> = ({ onBack }) => {
     </>
   );
 
-  const ValidationText = styled(Text)<{ isError: boolean | null }>`
+  const ValidationText = styled(Text) <{ isError: boolean | null }>`
   color: ${({ isError, theme }) => {
-    if (isError === null) return theme.colors.textSubtle; // Default color for empty state
-    return isError ? theme.colors.failure : theme.colors.textSubtle; // Red for error, normal for valid
-  }};
+      if (isError === null) return theme.colors.textSubtle; // Default color for empty state
+      return isError ? theme.colors.failure : theme.colors.textSubtle; // Red for error, normal for valid
+    }};
 `;
 
-// Add validation functions
-const validatePresaleRate = (value: string): boolean | null => {
-  if (!value || value.trim() === '') return null; // Return null for empty/blank values
-  const num = parseFloat(value);
-  return !isNaN(num) && num > 0;
-};
+  // Add validation functions
+  const validatePresaleRate = (value: string): boolean | null => {
+    if (!value || value.trim() === '') return null; // Return null for empty/blank values
+    const num = parseFloat(value);
+    return !isNaN(num) && num > 0;
+  };
 
-const validateSoftCap = (value: string): boolean | null => {
-  if (!value || value.trim() === '') return null;
-  const num = parseFloat(value);
-  return !Number.isNaN(num) && num > 0;
-};
+  const validateSoftCap = (value: string): boolean | null => {
+    if (!value || value.trim() === '') return null; // Return null for empty/blank values
+    const num = parseFloat(value);
+    return !isNaN(num) && num > 0;
+  };
 
-const validateHardCapVsSoftCap = (hardCapValue: string, softCapValue: string): boolean | null => {
-  if (!hardCapValue || hardCapValue.trim() === '') return null;
-  if (!softCapValue || softCapValue.trim() === '') return null;
-  
-  const hardNum = parseFloat(hardCapValue);
-  const softNum = parseFloat(softCapValue);
-  
-  if (Number.isNaN(hardNum) || Number.isNaN(softNum)) return false;
-  return hardNum >= softNum && hardNum > 0;
-};
+  const validateHardCapVsSoftCap = (hardCapValue: string, softCapValue: string): boolean | null => {
+    if (!hardCapValue || hardCapValue.trim() === '') return null;
+    if (!softCapValue || softCapValue.trim() === '') return null;
 
-const validateLiquidity = (value: string): boolean => {
-  const num = parseFloat(value);
-  return !isNaN(num) && num > 50;
-};
+    const hardNum = parseFloat(hardCapValue);
+    const softNum = parseFloat(softCapValue);
 
-const validateListingRate = (listingRate: string, presaleRate: string): boolean => {
-  const listingNum = parseFloat(listingRate);
-  const presaleNum = parseFloat(presaleRate);
-  return !isNaN(listingNum) && !isNaN(presaleNum) && listingNum < presaleNum;
-};
+    if (Number.isNaN(hardNum) || Number.isNaN(softNum)) return false;
+    return hardNum >= softNum && hardNum > 0;
+  };
 
-const validateTimeRange = (startDate: Date | null, endDate: Date | null): boolean => {
-  if (!startDate || !endDate) return true;
-  const diffInMinutes = (endDate.getTime() - startDate.getTime()) / (1000 * 60);
-  return diffInMinutes > 0 && diffInMinutes <= 14400;
-};
+  const validateLiquidity = (value: string): boolean => {
+    const num = parseFloat(value);
+    return !isNaN(num) && num > 50;
+  };
 
-const validateLockupTime = (value: string): boolean => {
-  const num = parseFloat(value);
-  return !isNaN(num) && num >= 30;
-};
+  const validateListingRate = (listingRate: string, presaleRate: string): boolean => {
+    const listingNum = parseFloat(listingRate);
+    const presaleNum = parseFloat(presaleRate);
+    return !isNaN(listingNum) && !isNaN(presaleNum) && listingNum < presaleNum;
+  };
+
+  const validateTimeRange = (startDate: Date | null, endDate: Date | null): boolean => {
+    if (!startDate || !endDate) return true;
+    const diffInMinutes = (endDate.getTime() - startDate.getTime()) / (1000 * 60);
+    return diffInMinutes > 0 && diffInMinutes <= 14400;
+  };
+
+  const validateLockupTime = (value: string): boolean => {
+    const num = parseFloat(value);
+    return !isNaN(num) && num >= 30;
+  };
+
+  // Add these options near the top of your component
+  const REFUND_OPTIONS = [
+    { label: "Burn", value: "burn" },
+    { label: "Refund", value: "refund" }
+  ];
+
+  const ROUTER_OPTIONS = [
+    { label: "Pancakeswap", value: "pancakeswap" },
+    { label: "Uniswap", value: "uniswap" },
+    { label: "Sushiswap", value: "sushiswap" }
+  ];
+
+  const [refundType, setRefundType] = useState<string>('burn');
+  const [dexRouter, setDexRouter] = useState<string>('pancakeswap');
+
+  // Define select styles if needed
+  const selectStyles = {
+    control: (provided: any) => ({
+      ...provided,
+      background: 'rgb(244, 240, 248)',
+      borderRadius: '16px',
+      border: '1px solid rgb(238, 234, 244)',
+      minHeight: '48px',
+      width: '100%'
+    }),
+    menu: (provided: any) => ({
+      ...provided,
+      background: 'rgb(244, 240, 248)',
+      borderRadius: '16px',
+      border: '1px solid rgb(238, 234, 244)',
+    })
+  };
 
   const renderStep2 = () => (
     <>
@@ -497,28 +601,28 @@ const validateLockupTime = (value: string): boolean => {
           <Text fontSize="12px" color="warning" mb="16px">(*) {t('is required field.')}</Text>
 
           <InputWrapper>
-      <InputLabel>{t('Presale rate*')}</InputLabel>
-      <CustomInput
-        type="number"
-        placeholder="0"
-        value={presaleRate}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPresaleRate(e.target.value)}
-      />
-      <ValidationText 
-        fontSize="12px" 
-        mt="8px"
-        isError={!validatePresaleRate(presaleRate)}
-      >
-        {t(`If I spend 1 ${currency} how many tokens will I receive?`)}
-      </ValidationText>
-    </InputWrapper>
+            <InputLabel>{t('Presale rate*')}</InputLabel>
+            <CustomInput
+              type="number"
+              placeholder="0"
+              value={presaleRate}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPresaleRate(e.target.value)}
+            />
+            <ValidationText
+              fontSize="12px"
+              mt="8px"
+              isError={!validatePresaleRate(presaleRate)}
+            >
+              {t(`If I spend 1 ${currency} how many tokens will I receive?`)}
+            </ValidationText>
+          </InputWrapper>
 
           <InputWrapper>
             <InputLabel>{t('Whitelist*')}</InputLabel>
             <StyledFlex flexDirection="column" gap="8px">
               {['Disable', 'Enable'].map((option) => (
                 <Flex key={option} alignItems="center">
-                  <Radio 
+                  <Radio
                     scale="sm"
                     checked={whitelist === option}
                     onChange={() => setWhitelist(option)}
@@ -533,39 +637,39 @@ const validateLockupTime = (value: string): boolean => {
           </InputWrapper>
 
           <StyledFlex gap="16px">
-  <InputWrapper>
-    <InputLabel>{t(`SoftCap (${currency})*`)}</InputLabel>
-    <CustomInput
-      placeholder="0"
-      type="number"
-      value={softCap}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSoftCap(e.target.value)}
-    />
-    <ValidationText 
-      fontSize="12px" 
-      mt="8px"
-      isError={validateSoftCap(softCap)}
-    >
-      {t('Softcap must be a positive number')}
-    </ValidationText>
-  </InputWrapper>
-  <InputWrapper>
-    <InputLabel>{t(`HardCap (${currency})*`)}</InputLabel>
-    <CustomInput
-      placeholder="0"
-      type="number"
-      value={hardCap}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHardCap(e.target.value)}
-    />
-    <ValidationText 
-      fontSize="12px" 
-      mt="8px"
-      isError={validateHardCapVsSoftCap(hardCap, softCap)}
-    >
-      {t('Hardcap must be greater than or equal to Softcap')}
-    </ValidationText>
-  </InputWrapper>
-</StyledFlex>
+            <InputWrapper>
+              <InputLabel>{t(`SoftCap (${currency})*`)}</InputLabel>
+              <CustomInput
+                placeholder="0"
+                type="number"
+                value={softCap}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSoftCap(e.target.value)}
+              />
+              <ValidationText
+                fontSize="12px"
+                mt="8px"
+                isError={!validateSoftCap(softCap)}
+              >
+                {t('Softcap must be a positive number')}
+              </ValidationText>
+            </InputWrapper>
+            <InputWrapper>
+              <InputLabel>{t(`HardCap (${currency})*`)}</InputLabel>
+              <CustomInput
+                placeholder="0"
+                type="number"
+                value={hardCap}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHardCap(e.target.value)}
+              />
+              <ValidationText
+                fontSize="12px"
+                mt="8px"
+                isError={!validateHardCapVsSoftCap(hardCap, softCap)}
+              >
+                {t('Hardcap must be greater than or equal to Softcap')}
+              </ValidationText>
+            </InputWrapper>
+          </StyledFlex>
 
 
           <StyledFlex gap="16px">
@@ -593,22 +697,30 @@ const validateLockupTime = (value: string): boolean => {
             </InputWrapper>
           </StyledFlex>
 
-          <StyledFlex gap="16px">
-            <InputWrapper>
-              <DefaultSelect
-                label={t('Refund type')}
-                options={[{ label: "Burn", value: "1" }]}
-                required
+          {/* <StyledFlex gap="16px" style={{ width: '100%' }}>
+            <InputWrapper style={{ flex: 1 }}>
+              <InputLabel>{t('Refund type*')}</InputLabel>
+              <ReactSelect
+                options={REFUND_OPTIONS}
+                value={REFUND_OPTIONS.find(option => option.value === refundType)}
+                onChange={(option) => setRefundType(option?.value || '')}
+                placeholder={t('Select Refund Type')}
+                styles={selectStyles}
+                isSearchable={false}
               />
             </InputWrapper>
-            <InputWrapper>
-              <DefaultSelect
-                label={t('Router')}
-                options={[{ label: "---Select Router Exchange---", value: "1" }]}
-                required
+            <InputWrapper style={{ flex: 1 }}>
+              <InputLabel>{t('Router*')}</InputLabel>
+              <ReactSelect
+                options={ROUTER_OPTIONS}
+                value={ROUTER_OPTIONS.find(option => option.value === dexRouter)}
+                onChange={(option) => setDexRouter(option?.value || '')}
+                placeholder={t('Select Router')}
+                styles={selectStyles}
+                isSearchable={false}
               />
             </InputWrapper>
-          </StyledFlex>
+          </StyledFlex> */}
 
           <StyledFlex gap="16px">
             <InputWrapper>
@@ -685,13 +797,23 @@ const validateLockupTime = (value: string): boolean => {
             {t('Need 0 FLASH to create presale.')}
           </Text>
 
+          {renderValidationMessage(2)}
           <ButtonContainer>
-            <StyledButton variant="secondary" onClick={() => setStep(1)}>
+            <StyledButton 
+              variant="secondary" 
+              onClick={() => setStep(1)}
+            >
               {t('Previous')}
             </StyledButton>
-            <StyledButton onClick={() => setStep(3)}>
+            <StyledButton 
+              onClick={() => setStep(3)}
+              disabled={!validateStep2()}
+            >
               {t('Next')}
             </StyledButton>
+            <div style={{ fontSize: '12px', color: 'red' }}>
+              {!validateStep2() && 'Please fill all required fields correctly'}
+            </div>
           </ButtonContainer>
         </Box>
       </Flex>
@@ -712,7 +834,6 @@ const validateLockupTime = (value: string): boolean => {
             <CustomInput
               required
               placeholder="Ex: https://..."
-              icon={LogoURLIcon}
               value={logoUrl}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLogoUrl(e.target.value)}
             />
@@ -728,7 +849,6 @@ const validateLockupTime = (value: string): boolean => {
             <CustomInput
               required
               placeholder="Ex: https://..."
-              icon={WebsiteIcon}
               value={website}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWebsite(e.target.value)}
             />
@@ -738,7 +858,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Twitter')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://twitter.com/..."
-              icon={TwitterIcon}
               value={twitter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTwitter(e.target.value)}
             />
@@ -748,7 +867,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Telegram')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://t.me/..."
-              icon={TelegramIcon}
               value={telegram}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTelegram(e.target.value)}
             />
@@ -758,7 +876,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Discord')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://discord.com/..."
-              icon={DiscordIcon}
               value={discord}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDiscord(e.target.value)}
             />
@@ -768,7 +885,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Github')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://github.com/..."
-              icon={GithubIcon}
               value={github}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGithub(e.target.value)}
             />
@@ -778,7 +894,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Facebook')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://facebook.com/..."
-              icon={FacebookIcon}
               value={facebook}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFacebook(e.target.value)}
             />
@@ -788,7 +903,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Instagram')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://instagram.com/..."
-              icon={InstagramIcon}
               value={instagram}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInstagram(e.target.value)}
             />
@@ -798,7 +912,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Reddit')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://reddit.com/..."
-              icon={RedditIcon}
               value={reddit}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReddit(e.target.value)}
             />
@@ -808,7 +921,6 @@ const validateLockupTime = (value: string): boolean => {
             <InputLabel>{t('Youtube Video')}</InputLabel>
             <CustomInput
               placeholder="Ex: https://youtube.com/watch?v="
-              icon={YoutubeIcon}
               value={youtube}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setYoutube(e.target.value)}
             />
@@ -911,43 +1023,200 @@ const validateLockupTime = (value: string): boolean => {
       </Flex>
     </>
   );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const {toastError, toastSuccess} = useToast()
+  const [isApproving, setIsApproving] = useState(false);
 
-  const handleSubmit = () => {
-    // Implement your submit logic here
-    console.log('Presale submitted', {
-      tokenAddress,
-      currency,
-      feeOption,
-      listingOption,
-      affiliateProgram,
-      presaleRate,
-      whitelist,
-      softCap,
-      hardCap,
-      minBuy,
-      maxBuy,
-      liquidity,
-      listingRate,
-      startDate,
-      endDate,
-      liquidityLockup,
-      website,
-      logoUrl,
-      facebook,
-      twitter,
-      github,
-      telegram,
-      instagram,
-      discord,
-      reddit,
-      youtube,
-      description,
-    });
-    onBack();
+  const handleSubmit = async () => {
+    try {
+      if (!window.ethereum) {
+        toastError('Error', 'Please install MetaMask!');
+        return;
+      }
+
+      // Input validation
+      if (!tokenAddress || !ethers.utils.isAddress(tokenAddress)) {
+        toastError('Error', 'Invalid token address');
+        return;
+      }
+
+      if (parseFloat(softCap) >= parseFloat(hardCap)) {
+        toastError('Error', 'Soft cap must be less than hard cap');
+        return;
+      }
+
+      if (parseFloat(minBuy) >= parseFloat(maxBuy)) {
+        toastError('Error', 'Min buy must be less than max buy');
+        return;
+      }
+
+      if (startDate >= endDate) {
+        toastError('Error', 'Start time must be before end time');
+        return;
+      }
+
+      setIsSubmitting(true);
+      const provider = new ethers.providers.Web3Provider(window.ethereum as any);
+      const signer = await provider.getSigner();
+      console.log('Got signer');
+
+      // Handle token approval first
+      try {
+        setIsApproving(true);
+        console.log('Starting token approval process');
+
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          [
+            "function approve(address spender, uint256 amount) external returns (bool)",
+            "function allowance(address owner, address spender) external view returns (uint256)",
+            "function totalSupply() external view returns (uint256)"
+          ],
+          signer
+        );
+
+        const address = await signer.getAddress();
+        const allowance = await tokenContract.allowance(address, CONTRACT_ADDRESS);
+        const totalSupply = await tokenContract.totalSupply();
+        console.log('Current allowance:', allowance.toString());
+        console.log('Total supply:', totalSupply.toString());
+
+        if (allowance.lt(totalSupply)) {
+          console.log('Approving tokens...');
+          const approveTx = await tokenContract.approve(
+            CONTRACT_ADDRESS,
+            ethers.constants.MaxUint256,
+            { gasLimit: 100000 }
+          );
+          console.log('Approval transaction hash:', approveTx.hash);
+
+          const approveReceipt = await approveTx.wait();
+          console.log('Approval confirmed:', approveReceipt);
+          
+          if (approveReceipt.status === 0) {
+            throw new Error('Approval transaction failed');
+          }
+          
+          toastSuccess('Success', 'Token approval confirmed!');
+        } else {
+          console.log('Token already approved');
+        }
+      } catch (approvalError) {
+        console.error('Approval error:', approvalError);
+        toastError('Error', 'Failed to approve token');
+        setIsSubmitting(false);
+        setIsApproving(false);
+        return;
+      }
+      setIsApproving(false);
+
+      // Create presale
+      console.log('Creating presale contract instance');
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
+
+      // Convert values to proper format
+      const rates = [
+        presaleRate,
+        listingRate
+      ];
+
+      const raises = [
+        parseEther(minBuy),
+        parseEther(maxBuy)
+      ];
+
+      const softCapWei = parseEther(softCap);
+      const hardCapWei = parseEther(hardCap);
+      const liquidityPercentage = liquidity;
+      const startTimeUnix = Math.floor(startDate.getTime());
+      const endTimeUnix = Math.floor(endDate.getTime() );
+
+      const params = {
+        tokenAddress,
+        baseToken: currency === 'BNB' ? ethers.constants.AddressZero : currency,
+        rates: rates,
+        raises: raises,
+        softCap: softCapWei,
+        hardCap: hardCapWei,
+        liquidityPercentage,
+        startTime: startTimeUnix,
+        endTime: endTimeUnix
+      };
+      console.log('Creating presale with params:', params);
+
+      // Estimate gas
+      try {
+        const gasEstimate = await contract.estimateGas.create(
+          tokenAddress,
+          currency === 'BNB' ? ethers.constants.AddressZero : currency,
+          rates,
+          raises,
+          softCapWei,
+          hardCapWei,
+          liquidityPercentage,
+          startTimeUnix,
+          endTimeUnix,
+          {
+            value: parseEther('0.01')
+          }
+        );
+        console.log('Estimated gas:', gasEstimate.toString());
+
+        // Add 20% buffer to gas estimate
+        const gasLimit = gasEstimate.mul(120).div(100);
+
+        const tx = await contract.create(
+          tokenAddress,
+          currency === 'BNB' ? ethers.constants.AddressZero : currency,
+          rates,
+          raises,
+          softCapWei,
+          hardCapWei,
+          liquidityPercentage,
+          startTimeUnix,
+          endTimeUnix,
+          {
+            value: ethers.utils.parseEther('0.01'),
+            gasLimit
+          }
+        );
+
+        console.log('Transaction sent:', tx.hash);
+        
+        const receipt = await tx.wait();
+        console.log('Transaction confirmed:', receipt);
+
+        if (receipt.status === 1) {
+          toastSuccess(
+            'Success',
+            'Your presale has been created successfully!'
+          );
+          window.location.href = '/launch/launchpad';
+        } else {
+          throw new Error('Transaction failed');
+        }
+
+      } catch (error) {
+        console.error('Transaction error:', error);
+        toastError(
+          'Error',
+          error instanceof Error ? error.message : 'Failed to create presale'
+        );
+      }
+
+    } catch (error) {
+      console.error('Full error object:', error);
+      toastError(
+        'Error',
+        error instanceof Error ? error.message : 'Failed to create presale'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const renderStepContent = () => {
-    switch(step) {
+    switch (step) {
       case 1:
         return renderStep1();
       case 2:
@@ -961,6 +1230,48 @@ const validateLockupTime = (value: string): boolean => {
     }
   };
 
+  // Optional: Add a helper text to show validation status
+  const ValidationHelper = styled(Text)`
+    text-align: center;
+    margin-top: 8px;
+    font-size: 12px;
+    color: ${({ theme }) => theme.colors.failure};
+  `;
+
+  // Add this before the ButtonContainer in both steps
+  const renderValidationMessage = (stepNumber: number) => {
+    if (stepNumber === 1 && !validateStep1()) {
+      return (
+        <ValidationHelper>
+          {t('Please fill in all required fields to proceed')}
+        </ValidationHelper>
+      );
+    }
+    if (stepNumber === 2 && !validateStep2()) {
+      return (
+        <ValidationHelper>
+          {t('Please ensure all fields are valid and filled correctly')}
+        </ValidationHelper>
+      );
+    }
+    return null;
+  };
+
+  // Add this validation function near your other validation functions
+  const validateTokenAddress = (address: string): boolean => {
+    // Check if address starts with 0x
+    if (!address.startsWith('0x')) return false;
+    
+    // Check if address is the correct length (42 characters = 0x + 40 hex chars)
+    if (address.length !== 42) return false;
+    
+    // Check if address contains only valid hex characters after 0x
+    const hexRegex = /^0x[0-9a-fA-F]{40}$/;
+    if (!hexRegex.test(address)) return false;
+    
+    return true;
+  };
+
   return (
     <LaunchpadPage>
       <Heading as="h1" scale="xl" mb="24px" color="secondary" textAlign="center">
@@ -968,13 +1279,13 @@ const validateLockupTime = (value: string): boolean => {
       </Heading>
       <StepIndicator currentStep={step} />
       <Box width="100%" mb="24px" style={{ display: 'flex', justifyContent: 'center' }}>
-  <StyledButton
-    onClick={onBack} 
-    scale="md"
-  >
-    {t('Back to Presales')}
-  </StyledButton>
-</Box>
+        <StyledButton
+          onClick={onBack}
+          scale="md"
+        >
+          {t('Back to Presales')}
+        </StyledButton>
+      </Box>
       <StyledCard>
         {renderStepContent()}
       </StyledCard>

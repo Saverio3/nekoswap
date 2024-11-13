@@ -108,26 +108,56 @@ function PresalePage() {
 
   const fetchPresales = async () => {
     try {
+      setLoading(true);
       const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
       const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider);
-      const presalesList = await contract.getAllPresales();
-      
-      const formattedPresales = presalesList.map(presale => ({
-        tokenAddress: presale.tokenAddress,
-        name: presale.name,
-        symbol: presale.symbol,
-        logoUrl: presale.logoUrl,
-        softCap: ethers.utils.formatEther(presale.softCap),
-        hardCap: ethers.utils.formatEther(presale.hardCap),
-        currentRaised: ethers.utils.formatEther(presale.currentRaised),
-        startTime: presale.startTime.toNumber(),
-        endTime: presale.endTime.toNumber(),
-        status: getPresaleStatus(presale.startTime.toNumber(), presale.endTime.toNumber())
-      }));
 
+      // First check if the contract is deployed
+      const code = await provider.getCode(CONTRACT_ADDRESS);
+      if (code === '0x') {
+        console.error('Contract not deployed at address:', CONTRACT_ADDRESS);
+        throw new Error('Contract not deployed');
+      }
+
+      console.log('Getting all presales...');
+      const presalesList = await contract.getAllPresales();
+      console.log('Raw presales data:', presalesList);
+
+      if (!presalesList || presalesList.length === 0) {
+        console.log('No presales found');
+        setPresales([]);
+        return;
+      }
+
+      const formattedPresales = presalesList.map((presale: any) => {
+        try {
+          return {
+            tokenAddress: presale.tokenAddress,
+            name: presale.name || 'Unknown',
+            symbol: presale.symbol || 'Unknown',
+            logoUrl: presale.logoUrl || '/default-token-logo.png',
+            softCap: ethers.utils.formatEther(presale.softCap),
+            hardCap: ethers.utils.formatEther(presale.hardCap),
+            currentRaised: ethers.utils.formatEther(presale.currentRaised),
+            startTime: Number(presale.startTime),
+            endTime: Number(presale.endTime),
+            status: getPresaleStatus(
+              Number(presale.startTime),
+              Number(presale.endTime)
+            )
+          };
+        } catch (error) {
+          console.error('Error formatting presale:', error, presale);
+          return null;
+        }
+      }).filter((p: PresaleInfo | null): p is PresaleInfo => p !== null);
+
+      console.log('Formatted presales:', formattedPresales);
       setPresales(formattedPresales);
+
     } catch (error) {
       console.error('Error fetching presales:', error);
+      setPresales([]);
     } finally {
       setLoading(false);
     }
@@ -182,7 +212,7 @@ function PresalePage() {
       <Box mb="24px">
         <img src="/presale-banner.png" alt="Presale Banner" />
       </Box>
-      <Flex mb="2px" alignItems="center">
+      <Flex mb="24px" alignItems="center">
         <SearchInput 
           placeholder="Search presales"
           value={searchTerm}
@@ -191,7 +221,15 @@ function PresalePage() {
         <Button onClick={handleSearch}>Search</Button>
       </Flex>
       {loading ? (
-        <Text>Loading presales...</Text>
+        <Box>
+          <Text mb="8px">Loading presales...</Text>
+          {/* Add a loading spinner or animation here if desired */}
+        </Box>
+      ) : presales.length === 0 ? (
+        <Box>
+          <Text>No presales found</Text>
+          <Text small color="textSubtle">Be the first to create a presale!</Text>
+        </Box>
       ) : (
         <Flex flexWrap="wrap" justifyContent="center">
           {presales.map(presale => renderPresaleCard(presale))}

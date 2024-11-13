@@ -1,5 +1,3 @@
-import Image from "next/image";
-
 import Search from "../../../assets/icons/search.svg";
 import ExportedImage from "next-image-export-optimizer";
 

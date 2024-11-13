@@ -2,8 +2,6 @@
 
 import React, { useState } from "react";
 
-import Image from "next/image";
-
 import IconBtn from "../../Button/IconBtn";
 
 import Home from "../../../assets/icons/home.svg";

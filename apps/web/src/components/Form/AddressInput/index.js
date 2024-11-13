@@ -1,4 +1,3 @@
-import Image from "next/image";
 
 //! import icons
 import EtherscanLogoIcon from "../../../assets/icons/etherscan-logo-small.svg";

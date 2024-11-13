@@ -7,7 +7,7 @@
     "noImplicitAny": false,
     "noFallthroughCasesInSwitch": true,
     "downlevelIteration": true,
-    "target": "es6"
+    "target": "esnext"
   },
   "exclude": ["node_modules"],
   "include": ["next-env.d.ts", "./src/**/*.ts", "./src/**/*.tsx", "src/views/launch/create-token/page.js", "src/views/launch/create-token/page.js", "src/views/launch/create-token/CustomFormComponents.js"]
